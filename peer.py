@@ -4,174 +4,180 @@ import random
 from file_chunker import divide_file_into_chunks, write_chunk_to_file, CHUNK_SIZE
 from time import sleep
 
-TRACKER_HOST = '127.0.0.1'  # Replace with the actual tracker server IP
-TRACKER_PORT = 9090
+class Peer:
+    def __init__(self, tracker_host='127.0.0.1', tracker_port=9090):
+        self.tracker_host = tracker_host
+        self.tracker_port = tracker_port
+        self.peer_chunks = {}  # Store chunks in memory
+        self.received_chunks = set()  # Track downloaded chunks
+        self.uploaded_chunks = {}  # Track uploads per peer
+        self.peer_port = None  # Dynamically assigned port for the peer
+        self.top_peers = []  # Top 4 peers by upload contribution
+        self.optimistic_peer = None  # Optimistically unchoked peer
+        self.peers = []  # List of all available peers
 
-peer_chunks = {}  # Dictionary to store chunks in-memory
-peer_port = None  # Global variable to store the dynamically assigned port
-uploaded_chunks = {}  # Track how many chunks each peer has uploaded
-received_chunks = set()  # Track chunks that have been downloaded
-top_peers = []  # List to store top 4 peers
-optimistic_peer = None  # Peer selected for optimistic unchoking
+    def start(self, peer_ip, file_to_share=None):
+        """
+        Starts the peer, registers with the tracker, and begins chunk sharing.
+        """
+        self.peer_ip = peer_ip
 
-def handle_chunk_request(conn):
-    """
-    Handle requests for file chunks from other peers.
-    """
-    chunk_number = conn.recv(1024).decode()
-    chunk_number = int(chunk_number)  # Convert the chunk number to an integer
+        # Start listening for chunk requests in a separate thread
+        threading.Thread(target=self.listen_for_requests).start()
 
-    if chunk_number in peer_chunks:
-        print(f"Sending chunk {chunk_number}")
-        conn.send(peer_chunks[chunk_number])
-        # Track the number of chunks uploaded to this peer
-        addr = conn.getpeername()[0]  # Get the requesting peer's IP address
-        uploaded_chunks[addr] = uploaded_chunks.get(addr, 0) + 1
-    else:
-        conn.send(b"CHUNK_NOT_FOUND")
-    conn.close()
+        if file_to_share:
+            self.share_file(file_to_share)
 
-def listen_for_requests():
-    """
-    Starts a peer's server to listen for chunk requests from other peers.
-    """
-    global peer_port
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('0.0.0.0', 0))  # Bind to an available port
-    peer_port = server_socket.getsockname()[1]  # Get the dynamically assigned port
-    print(f"Listening for chunk requests on port {peer_port}...")
+        # Register this peer with the tracker and get the list of peers
+        self.peers = self.connect_to_tracker()
 
-    server_socket.listen(5)
-    while True:
-        conn, addr = server_socket.accept()
-        print(f"Connection from {addr}")
-        threading.Thread(target=handle_chunk_request, args=(conn,)).start()
+        # Start refreshing the top peers every 30 seconds
+        threading.Thread(target=self.refresh_top_peers_periodically).start()
 
-def request_chunk_from_peer(peer_ip, chunk_number, peer_port):
-    """
-    Request a file chunk from another peer by chunk number.
-    
-    :param peer_ip: IP address of the peer to request the chunk from
-    :param chunk_number: The number of the chunk to request
-    :param peer_port: Port on which the peer is listening
-    :return: The chunk data if found, None otherwise
-    """
-    peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    peer_socket.connect((peer_ip, peer_port))
-    peer_socket.send(str(chunk_number).encode())
+    def listen_for_requests(self):
+        """
+        Listens for incoming chunk requests from other peers.
+        """
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.bind(('0.0.0.0', 0))
+        self.peer_port = server_socket.getsockname()[1]
+        print(f"Listening for chunk requests on port {self.peer_port}...")
 
-    chunk_data = peer_socket.recv(CHUNK_SIZE)
-    peer_socket.close()
+        server_socket.listen(5)
+        while True:
+            conn, addr = server_socket.accept()
+            print(f"Connection from {addr}")
+            threading.Thread(target=self.handle_chunk_request, args=(conn,)).start()
 
-    if chunk_data == b"CHUNK_NOT_FOUND":
-        print(f"Chunk {chunk_number} not found on {peer_ip}")
-        return None
-    else:
-        print(f"Received chunk {chunk_number} from {peer_ip}")
-        return chunk_data
+    def handle_chunk_request(self, conn):
+        """
+        Handles requests for file chunks from other peers.
+        """
+        try:
+            chunk_number = int(conn.recv(1024).decode())
+            if chunk_number in self.peer_chunks:
+                print(f"Sending chunk {chunk_number}")
+                conn.send(self.peer_chunks[chunk_number])
+                self.track_upload(conn, chunk_number)
+            else:
+                conn.send(b"CHUNK_NOT_FOUND")
+        except Exception as e:
+            print(f"Error handling chunk request: {e}")
+        finally:
+            conn.close()
 
-def connect_to_tracker(peer_ip, peer_port):
-    """
-    Connects to the tracker and registers the peer, then gets the list of other peers.
-    
-    :param peer_ip: The IP address of the peer.
-    :param peer_port: The port that the peer is listening on.
-    :return: List of other peers from the tracker.
-    """
-    tracker_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tracker_socket.connect((TRACKER_HOST, TRACKER_PORT))
+    def track_upload(self, conn, chunk_number):
+        """
+        Tracks the number of chunks uploaded to each peer for optimistic unchoking.
+        """
+        addr = conn.getpeername()[0]
+        self.uploaded_chunks[addr] = self.uploaded_chunks.get(addr, 0) + 1
+        print(f"Uploaded chunk {chunk_number} to {addr}. Total uploads: {self.uploaded_chunks[addr]}")
 
-    # Register this peer with the tracker
-    tracker_socket.send(f"ADD_PEER {peer_ip}:{peer_port}".encode())
-    response = tracker_socket.recv(1024).decode()
-    print(f"Tracker response: {response}")
-
-    # Request list of peers
-    tracker_socket.send("REQUEST_PEERS".encode())
-    peers_list = tracker_socket.recv(1024).decode().split("\n")
-    tracker_socket.close()
-
-    print(f"Known peers: {peers_list}")
-    return peers_list
-
-def update_top_peers(peers):
-    """
-    Periodically updates the top 4 peers based on upload contribution and selects one optimistic peer.
-    """
-    global top_peers, optimistic_peer
-
-    # Sort peers by the number of chunks they've uploaded (highest first)
-    sorted_peers = sorted(uploaded_chunks.items(), key=lambda item: item[1], reverse=True)
-    
-    # Get the top 4 peers by bandwidth
-    top_peers = [peer[0] for peer in sorted_peers[:4]]
-
-    # Optimistic unchoking: Select a random peer outside the top 4
-    non_top_peers = [peer for peer in peers if peer not in top_peers]
-    optimistic_peer = random.choice(non_top_peers) if non_top_peers else None
-
-    print(f"Top 4 peers: {top_peers}")
-    print(f"Optimistic unchoking peer: {optimistic_peer}")
-
-def refresh_top_peers_periodically(peers, interval=30):
-    """
-    Refresh the list of top peers every `interval` seconds.
-    """
-    while True:
-        update_top_peers(peers)
-        sleep(interval)
-
-def check_if_all_chunks_received(total_chunks):
-    """
-    Check if the peer has received all the chunks by comparing the number of received chunks.
-    """
-    if len(received_chunks) == total_chunks:
-        print(f"Peer has received all {total_chunks} chunks!")
-        return True
-    return False
-
-def start_peer(peer_ip, file_to_share=None):
-    """
-    Starts the peer node, connects to the tracker, and begins sharing chunks with other peers.
-    
-    :param peer_ip: The IP address of this peer.
-    :param file_to_share: Optional file to share with other peers (will be divided into chunks).
-    """
-    # Start listening for incoming chunk requests in a separate thread
-    listen_thread = threading.Thread(target=listen_for_requests)
-    listen_thread.start()
-
-    if file_to_share:
-        print(f"Sharing file: {file_to_share}")
-        # Divide file into chunks and store them in-memory with chunk numbers
+    def share_file(self, file_to_share):
+        """
+        Splits a file into chunks and prepares them for sharing.
+        """
         total_chunks = 0
         for chunk, chunk_number in divide_file_into_chunks(file_to_share):
-            peer_chunks[chunk_number] = chunk
+            self.peer_chunks[chunk_number] = chunk
             total_chunks += 1
             print(f"Chunk {chunk_number} ready for sharing.")
+        self.total_chunks = total_chunks
 
-    # Register this peer with the tracker and get a list of peers
-    peers = connect_to_tracker(peer_ip, peer_port)
+    def request_chunk(self, peer_ip, chunk_number, peer_port):
+        """
+        Requests a chunk from another peer.
+        """
+        try:
+            peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            peer_socket.connect((peer_ip, peer_port))
+            peer_socket.send(str(chunk_number).encode())
+            chunk_data = peer_socket.recv(CHUNK_SIZE)
+            peer_socket.close()
 
-    # Start refreshing the top peers every 30 seconds in a background thread
-    threading.Thread(target=refresh_top_peers_periodically, args=(peers,)).start()
+            if chunk_data == b"CHUNK_NOT_FOUND":
+                print(f"Chunk {chunk_number} not found on {peer_ip}")
+                return None
+            else:
+                print(f"Received chunk {chunk_number} from {peer_ip}")
+                return chunk_data
+        except Exception as e:
+            print(f"Error requesting chunk from {peer_ip}: {e}")
+            return None
 
-    # Example of requesting a chunk from another peer
-    if peers and peers[0]:  # Ensure there are peers to request from
-        peer_to_request_from = peers[0].split(":")[0]
-        example_chunk_number = 1  # Request chunk 1 from another peer for demonstration
-        received_chunk = request_chunk_from_peer(peer_to_request_from, example_chunk_number, peer_port)
+    def connect_to_tracker(self):
+        """
+        Connects to the tracker, registers the peer, and retrieves a list of other peers.
+        """
+        try:
+            tracker_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tracker_socket.connect((self.tracker_host, self.tracker_port))
 
-        if received_chunk:
-            received_chunks.add(example_chunk_number)  # Track the received chunk
-            print(f"Chunk {example_chunk_number} received successfully!")
-            # Optionally, save the received chunk to a file
-            write_chunk_to_file(received_chunk, example_chunk_number, "received_chunks")
+            # Register this peer with the tracker
+            tracker_socket.send(f"ADD_PEER {self.peer_ip}:{self.peer_port}".encode())
+            response = tracker_socket.recv(1024).decode()
+            print(f"Tracker response: {response}")
 
-    # Check if the peer has received all chunks (this is simplified; adapt as needed)
-    check_if_all_chunks_received(total_chunks)
+            # Request the list of peers
+            tracker_socket.send("REQUEST_PEERS".encode())
+            peers_list = tracker_socket.recv(1024).decode().split("\n")
+            tracker_socket.close()
+
+            print(f"Known peers: {peers_list}")
+            return peers_list
+        except Exception as e:
+            print(f"Error connecting to tracker: {e}")
+            return []
+
+    def update_top_peers(self):
+        """
+        Updates the top 4 peers based on upload contribution and selects one for optimistic unchoking.
+        """
+        sorted_peers = sorted(self.uploaded_chunks.items(), key=lambda item: item[1], reverse=True)
+        self.top_peers = [peer[0] for peer in sorted_peers[:4]]
+
+        non_top_peers = [peer for peer in self.peers if peer not in self.top_peers]
+        self.optimistic_peer = random.choice(non_top_peers) if non_top_peers else None
+
+        print(f"Top 4 peers: {self.top_peers}")
+        print(f"Optimistically unchoked peer: {self.optimistic_peer}")
+
+    def refresh_top_peers_periodically(self, interval=30):
+        """
+        Refreshes the list of top peers every 30 seconds.
+        """
+        while True:
+            self.update_top_peers()
+            sleep(interval)
+
+    def check_if_all_chunks_received(self):
+        """
+        Checks if the peer has received all the chunks.
+        """
+        if len(self.received_chunks) == self.total_chunks:
+            print(f"All {self.total_chunks} chunks received!")
+            return True
+        return False
+
+    def download_chunks(self):
+        """
+        Example method to request chunks from peers and save them to disk.
+        """
+        if self.peers and self.peers[0]:
+            peer_to_request_from = self.peers[0].split(":")[0]
+            chunk_number = 1  # Example chunk number to request
+            received_chunk = self.request_chunk(peer_to_request_from, chunk_number, self.peer_port)
+
+            if received_chunk:
+                self.received_chunks.add(chunk_number)
+                write_chunk_to_file(received_chunk, chunk_number, "received_chunks")
+                print(f"Chunk {chunk_number} received and saved.")
+
+        self.check_if_all_chunks_received()
 
 if __name__ == "__main__":
-    peer_ip = "127.0.0.1"  # Replace with the actual peer IP
-    file_to_share = "example_file.txt"  # Replace with the file you want to share
-    start_peer(peer_ip, file_to_share)
+    peer_ip = "127.0.0.1"  # Replace with actual peer IP
+    file_to_share = "example_file.txt"  # Replace with actual file
+    peer = Peer()
+    peer.start(peer_ip, file_to_share)
