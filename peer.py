@@ -3,6 +3,7 @@ import threading
 import random
 from file_chunker import divide_file_into_chunks, write_chunk_to_file, CHUNK_SIZE
 from time import sleep
+from concurrent.futures import ThreadPoolExecutor
 
 class Peer:
     def __init__(self, tracker_host='127.0.0.1', tracker_port=9090):
@@ -22,7 +23,7 @@ class Peer:
         """
         self.peer_ip = peer_ip
 
-        # Start listening for chunk requests in a separate thread
+        # Start listening for chunk requests in a thread pool for better scalability
         threading.Thread(target=self.listen_for_requests).start()
 
         if file_to_share:
@@ -36,7 +37,7 @@ class Peer:
 
     def listen_for_requests(self):
         """
-        Listens for incoming chunk requests from other peers.
+        Listens for incoming chunk requests from other peers using a thread pool.
         """
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind(('0.0.0.0', 0))
@@ -44,10 +45,12 @@ class Peer:
         print(f"Listening for chunk requests on port {self.peer_port}...")
 
         server_socket.listen(5)
-        while True:
-            conn, addr = server_socket.accept()
-            print(f"Connection from {addr}")
-            threading.Thread(target=self.handle_chunk_request, args=(conn,)).start()
+
+        with ThreadPoolExecutor(max_workers=10) as executor:  # Use thread pool to handle requests
+            while True:
+                conn, addr = server_socket.accept()
+                print(f"Connection from {addr}")
+                executor.submit(self.handle_chunk_request, conn)  # Submit to thread pool
 
     def handle_chunk_request(self, conn):
         """
@@ -179,5 +182,5 @@ class Peer:
 if __name__ == "__main__":
     peer_ip = "127.0.0.1"  # Replace with actual peer IP
     file_to_share = "example_file.txt"  # Replace with actual file
-    peer = Peer()
+    peer = Peer() 
     peer.start(peer_ip, file_to_share)
