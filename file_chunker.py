@@ -1,67 +1,65 @@
 import os
+import hashlib
 
-CHUNK_SIZE = 256 * 1024  # 256KB per chunk
+CHUNK_SIZE = 64 * 1024  # 256 KB per chunk
 
 def divide_file_into_chunks(file_path, chunk_size=CHUNK_SIZE):
     """
-    Divides a file into smaller chunks and returns an iterator of (chunk_data, chunk_number).
-    
+    Splits a file into smaller chunks, calculates a SHA1 hash for each, and yields 
+    the chunk data along with its hash and sequential chunk number.
+
     :param file_path: Path to the file to be divided
-    :param chunk_size: Size of each chunk in bytes (default 256KB)
-    :return: Iterator that yields tuples of (chunk_data, chunk_number)
+    :param chunk_size: Size of each chunk in bytes (default 256 KB)
+    :yield: Tuple containing chunk data, SHA1 hash, and the chunk number
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File {file_path} does not exist.")
     
-    try:
-        chunk_number = 1
-        with open(file_path, 'rb') as file:
-            while chunk := file.read(chunk_size):
-                yield chunk, chunk_number
-                chunk_number += 1
-    except Exception as e:
-        raise Exception(f"Error reading file {file_path}: {e}")
+    chunk_number = 1
+    with open(file_path, 'rb') as file:
+        while chunk := file.read(chunk_size):
+            chunk_hash = hashlib.sha1(chunk).hexdigest()
+            yield chunk, chunk_hash, chunk_number
+            chunk_number += 1
 
-def write_chunk_to_file(chunk_data, chunk_number, output_dir):
+def write_chunk_to_file(chunk_data, chunk_number, output_dir="chunks"):
     """
-    Writes a chunk to a file with the chunk number as the filename.
-    
+    Saves a chunk to a file in the specified output directory.
+
     :param chunk_data: The binary data of the chunk
     :param chunk_number: The number of the chunk (used as filename)
     :param output_dir: Directory to store the chunk files
-    :return: Boolean indicating success or failure
     """
-    try:
-        os.makedirs(output_dir, exist_ok=True)
-        chunk_file_path = os.path.join(output_dir, f"chunk_{chunk_number}.chunk")
-        with open(chunk_file_path, 'wb') as chunk_file:
-            chunk_file.write(chunk_data)
-        print(f"Chunk {chunk_number} saved.")
-        return True
-    except Exception as e:
-        print(f"Failed to write chunk {chunk_number}: {e}")
-        return False
-
-def divide_and_save_chunks(file_path, output_dir, chunk_size=CHUNK_SIZE):
-    """
-    Divides a file into chunks and writes each chunk to an output directory.
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     
-    :param file_path: Path to the file to be divided
-    :param output_dir: Directory to store the chunk files
-    :param chunk_size: Size of each chunk in bytes (default 256KB)
+    chunk_file_path = os.path.join(output_dir, f"chunk_{chunk_number}.chunk")
+    with open(chunk_file_path, 'wb') as chunk_file:
+        chunk_file.write(chunk_data)
+    print(f"Chunk {chunk_number} saved to {chunk_file_path}")
+
+def print_chunk_data(file_path, chunk_number_to_display=1):
     """
-    try:
-        for chunk_data, chunk_number in divide_file_into_chunks(file_path, chunk_size):
-            success = write_chunk_to_file(chunk_data, chunk_number, output_dir)
-            if not success:
-                print(f"Error writing chunk {chunk_number}. Aborting further processing.")
-                break
-    except Exception as e:
-        print(f"Error during file chunking: {e}")
+    Prints data of a specific chunk for demonstration purposes, including the hash.
 
+    :param file_path: Path to the file to be divided into chunks
+    :param chunk_number_to_display: The specific chunk number to display data for
+    """
+    for chunk, chunk_hash, chunk_number in divide_file_into_chunks(file_path):
+        if chunk_number == chunk_number_to_display:
+            print(f"Chunk {chunk_number} hash: {chunk_hash}")
+            print(f"Chunk {chunk_number} data:\n{chunk.decode(errors='replace')[:100]}...")  # Print first 100 characters
+            break
+
+# Example usage for testing
 if __name__ == "__main__":
-    # Example Usage:
-    file_path = "path_to_your_file"  # Replace with the file you want to chunk
-    output_directory = "output_chunks_directory"  # Replace with the desired output directory
+    file_path = "/Users/prabhudattamishra/Desktop/P2P/dark_knight.txt"  # Replace with actual file path
 
-    divide_and_save_chunks(file_path, output_directory)
+    # Print specific chunk data for demonstration
+    print_chunk_data(file_path, chunk_number_to_display=1)
+
+    # Example: Save chunks to disk with their hashes
+    output_directory = "/Users/prabhudattamishra/Desktop/P2P/chunks"  # Modify as needed
+    for chunk, chunk_hash, chunk_number in divide_file_into_chunks(file_path):
+        write_chunk_to_file(chunk, chunk_number, output_dir=output_directory)
+        print(f"Chunk {chunk_number} hash: {chunk_hash}")
