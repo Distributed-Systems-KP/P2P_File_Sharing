@@ -1,6 +1,7 @@
 from peer import Peer
 from torrent_metadata import TorrentMetadata
 from piece_manager import PieceManager
+from hashing import verify_chunk
 import os
 
 class TorrentClient:
@@ -34,20 +35,40 @@ class TorrentClient:
         for peer in self.peers:
             rarest_piece = self.piece_manager.get_rarest_piece()
             if rarest_piece:
-                chunk = peer.request_chunk_from_peer(rarest_piece)
-                if chunk and peer.verify_chunk(chunk):
+                # Request chunk data and expected hash
+                chunk_data, expected_hash = peer.request_chunk_from_peer(rarest_piece)
+
+                if chunk_data and verify_chunk(chunk_data, expected_hash):
+                    # If verification succeeds, mark the piece as complete
                     self.piece_manager.mark_piece_complete(rarest_piece)
-                    print(f"Downloaded piece {rarest_piece} successfully")
+                    self.save_chunk_to_disk(chunk_data, rarest_piece)
+                    print(f"Downloaded and verified piece {rarest_piece} successfully")
+                else:
+                    print(f"Failed to verify piece {rarest_piece}")
+
+    def save_chunk_to_disk(self, chunk_data, chunk_number):
+        """
+        Saves a verified chunk to disk.
+        """
+        chunk_dir = "chunks"
+        if not os.path.exists(chunk_dir):
+            os.makedirs(chunk_dir)
+
+        chunk_path = os.path.join(chunk_dir, f"chunk_{chunk_number}.chunk")
+        with open(chunk_path, 'wb') as chunk_file:
+            chunk_file.write(chunk_data)
 
     def reassemble_file(self):
         """
         Reassembles downloaded pieces into the original file once all pieces are complete.
         """
-        with open(f"reassembled_{os.path.basename(self.file_path)}", 'wb') as final_file:
+        output_file = f"reassembled_{os.path.basename(self.file_path)}"
+        with open(output_file, 'wb') as final_file:
             for i in range(1, self.metadata.total_chunks + 1):
-                with open(f"chunks/chunk_{i}.chunk", 'rb') as chunk_file:
+                chunk_path = os.path.join("chunks", f"chunk_{i}.chunk")
+                with open(chunk_path, 'rb') as chunk_file:
                     final_file.write(chunk_file.read())
-        print("File reassembly complete.")
+        print(f"File reassembly complete. Saved as {output_file}")
 
 if __name__ == "__main__":
     peer_ip = "127.0.0.1"  # Replace with actual IP
