@@ -3,6 +3,7 @@
 ![Contributions](https://img.shields.io/badge/contributions-welcome-orange.svg)
 ![Stars](https://img.shields.io/github/stars/Prabhudatta3004/P2P_File_Sharing)
 ![Forks](https://img.shields.io/github/forks/Prabhudatta3004/P2P_File_Sharing)
+![Issues](https://img.shields.io/github/issues/Prabhudatta3004/P2P_File_Sharing)
 
 
 This project is a BitTorrent-inspired Peer-to-Peer (P2P) file sharing system that enables users to share files by dividing them into chunks and distributing these chunks across peers. The system leverages a tracker server to coordinate peers and manage chunk availability.
