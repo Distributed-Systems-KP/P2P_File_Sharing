@@ -1,4 +1,4 @@
-# batTorrent: P2P_File_Sharing_System
+# BatTorrent: P2P_File_Sharing_System
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![Contributions](https://img.shields.io/badge/contributions-welcome-orange.svg)
 ![Stars](https://img.shields.io/github/stars/Prabhudatta3004/P2P_File_Sharing)
