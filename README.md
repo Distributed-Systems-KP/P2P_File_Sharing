@@ -1,5 +1,9 @@
 # batTorrent: P2P_File_Sharing_System
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+![Contributions](https://img.shields.io/badge/contributions-welcome-orange.svg)
+![Stars](https://img.shields.io/github/stars/Prabhudatta3004/P2P_File_Sharing)
+![Forks](https://img.shields.io/github/forks/Prabhudatta3004/P2P_File_Sharing)
+
 
 This project is a BitTorrent-inspired Peer-to-Peer (P2P) file sharing system that enables users to share files by dividing them into chunks and distributing these chunks across peers. The system leverages a tracker server to coordinate peers and manage chunk availability.
 
