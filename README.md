@@ -8,6 +8,11 @@
 
 This project is a BitTorrent-inspired Peer-to-Peer (P2P) file sharing system that enables users to share files by dividing them into chunks and distributing these chunks across peers. The system leverages a tracker server to coordinate peers and manage chunk availability.
 
+
+## Authors
+- **Kabir Singh Bhatia (kbhatia@ncsu.edu)**
+- **Prabhudatta Mishra (pmishra4@ncsu.edu)**
+
 ## Features
 
 - **File Chunking**: Files are split into fixed-size chunks with SHA1 hashes for integrity.
@@ -112,6 +117,7 @@ We welcome contributions to improve the project! Here’s how to get started:
 - Adding a graphical interface for user-friendly interactions.
 - Adding Unit tests and system checks.
 - Implementing DHT (Distributed Hashing tables) instead of tracker_server.
+
 
 ## License
 
